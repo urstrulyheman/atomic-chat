@@ -63,6 +63,28 @@ class SendMessageRequest(BaseModel):
         return value.strip()
 
 
+class MessagePriceQuoteRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=settings.message_max_content_length)
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        if not isinstance(value, str):
+            return value
+        return value.strip()
+
+
+class MessagePriceQuoteOut(BaseModel):
+    pricing_model: str
+    token_count: int
+    tokens_per_unit: int
+    billing_units: int
+    message_cost: Decimal
+    receiver_reward: Decimal
+    platform_gas: Decimal
+    reserve_reward: Decimal
+
+
 class MessageOut(BaseModel):
     id: UUID
     conversation_id: UUID

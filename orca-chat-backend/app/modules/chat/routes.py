@@ -111,6 +111,14 @@ async def send_message(
     return body
 
 
+@router.post("/messages/quote", response_model=schemas.MessagePriceQuoteOut)
+def quote_message_price(
+    payload: schemas.MessagePriceQuoteRequest,
+    current_user: User = Depends(get_current_user),
+):
+    return service.message_price_quote(payload.content)
+
+
 @router.post("/chats/{chat_id}/read", response_model=schemas.ConversationReadResponse)
 def mark_chat_read(chat_id: UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return service.mark_conversation_read(db, current_user, chat_id)

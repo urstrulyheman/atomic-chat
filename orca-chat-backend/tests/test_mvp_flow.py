@@ -187,6 +187,37 @@ def test_paid_message_cost_scales_by_billing_tokens():
     assert transaction["metadata"]["billing_units"] == 2
 
 
+def test_message_price_quote_matches_token_billing_without_spending():
+    sender = login("+919000000175", "Quote Sender")
+    content = "x" * 81
+
+    quote = client.post(
+        "/messages/quote",
+        json={"content": content},
+        headers=auth(sender["access_token"]),
+    )
+    blank = client.post(
+        "/messages/quote",
+        json={"content": "   "},
+        headers=auth(sender["access_token"]),
+    )
+    balance = client.get("/wallet/balance", headers=auth(sender["access_token"]))
+
+    assert quote.status_code == 200
+    assert quote.json() == {
+        "pricing_model": "token_units",
+        "token_count": 21,
+        "tokens_per_unit": 20,
+        "billing_units": 2,
+        "message_cost": "2.000000",
+        "receiver_reward": "1.300000",
+        "platform_gas": "0.500000",
+        "reserve_reward": "0.200000",
+    }
+    assert blank.status_code == 422
+    assert balance.json()["spendable_balance"] == "20.000000"
+
+
 def test_admin_metrics_support_date_windows():
     sender = login("+919000000117", "Metrics Window Sender")
     receiver = login("+919000000118", "Metrics Window Receiver")

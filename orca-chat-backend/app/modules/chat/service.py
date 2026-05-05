@@ -273,6 +273,20 @@ def calculate_message_pricing(content: str) -> dict:
     }
 
 
+def message_price_quote(content: str) -> dict:
+    pricing = calculate_message_pricing(content)
+    return {
+        "pricing_model": "token_units",
+        "token_count": pricing["token_count"],
+        "tokens_per_unit": settings.message_billing_tokens_per_unit,
+        "billing_units": pricing["billing_units"],
+        "message_cost": pricing["message_cost"],
+        "receiver_reward": pricing["receiver_reward"],
+        "platform_gas": pricing["platform_gas"],
+        "reserve_reward": pricing["reserve_reward"],
+    }
+
+
 def daily_free_message_limit(user: User) -> int:
     if user.kyc_status == "premium":
         return settings.premium_user_daily_free_messages

@@ -23,24 +23,9 @@ import "./styles.css";
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const WS = API.replace(/^http/, "ws");
 const TOKEN_KEY = "orca_access_token";
-const BILLING_TOKENS_PER_UNIT = 20;
-const ORCA_PER_BILLING_UNIT = 1;
 
 const money = (value) => Number(value || 0).toFixed(2);
 const initials = (user) => (user?.name || user?.username || user?.phone || "?").slice(0, 2).toUpperCase();
-const estimateTokens = (content) => {
-  const normalized = content.trim().replace(/\s+/g, " ");
-  return normalized ? Math.max(1, Math.ceil(normalized.length / 4)) : 0;
-};
-const estimateMessageCost = (content) => {
-  const tokens = estimateTokens(content);
-  const billingUnits = Math.max(1, Math.ceil(tokens / BILLING_TOKENS_PER_UNIT));
-  return {
-    tokens,
-    billingUnits,
-    cost: tokens ? billingUnits * ORCA_PER_BILLING_UNIT : ORCA_PER_BILLING_UNIT
-  };
-};
 
 async function request(path, options = {}) {
   const token = sessionStorage.getItem(TOKEN_KEY);
@@ -237,8 +222,32 @@ function WalletPanel({ wallet, payments, transactions, onRecharge }) {
 
 function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
   const [text, setText] = React.useState("");
+  const [quote, setQuote] = React.useState(null);
   const endRef = React.useRef(null);
   React.useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, chat?.id]);
+  React.useEffect(() => {
+    const content = text.trim();
+    if (!content) {
+      setQuote(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await request("/messages/quote", {
+          method: "POST",
+          body: JSON.stringify({ content })
+        });
+        if (!cancelled) setQuote(data);
+      } catch {
+        if (!cancelled) setQuote(null);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [text, chat?.id]);
   if (!chat) {
     return (
       <section className="chat-empty">
@@ -249,7 +258,6 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
     );
   }
   const other = chat.user;
-  const estimate = estimateMessageCost(text);
   async function submit() {
     const value = text.trim();
     if (!value) return;
@@ -261,7 +269,7 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
       <header className="chat-header">
         <Avatar user={other} />
         <div><strong>{other?.name || other?.phone}</strong><span>{wsOnline ? "WebSocket online" : "REST fallback ready"}</span></div>
-        <div className="fee-pill">{money(estimate.cost)} ORCA est.</div>
+        <div className="fee-pill">{quote ? `${money(quote.message_cost)} ORCA` : "Token priced"}</div>
       </header>
       <div className="message-wall">
         {messages.map((msg) => {
@@ -285,7 +293,11 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
               submit();
             }
           }} />
-          <small>{estimate.tokens} tokens · {estimate.billingUnits} billing unit{estimate.billingUnits === 1 ? "" : "s"}</small>
+          <small>
+            {quote
+              ? `${quote.token_count} tokens · ${quote.billing_units} billing unit${quote.billing_units === 1 ? "" : "s"}`
+              : "Type to calculate token cost"}
+          </small>
         </div>
         <IconButton title="Send paid message" onClick={submit} disabled={!text.trim()}><Send size={20} /></IconButton>
       </footer>

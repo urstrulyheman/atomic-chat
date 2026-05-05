@@ -258,6 +258,7 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
     );
   }
   const other = chat.user;
+  const cannotAfford = Boolean(text.trim() && quote && !quote.can_afford);
   async function submit() {
     const value = text.trim();
     if (!value) return;
@@ -269,7 +270,9 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
       <header className="chat-header">
         <Avatar user={other} />
         <div><strong>{other?.name || other?.phone}</strong><span>{wsOnline ? "WebSocket online" : "REST fallback ready"}</span></div>
-        <div className="fee-pill">{quote ? `${money(quote.message_cost)} ORCA` : "Token priced"}</div>
+        <div className={`fee-pill ${cannotAfford ? "danger" : ""}`}>
+          {quote ? `${money(quote.message_cost)} ORCA` : "Token priced"}
+        </div>
       </header>
       <div className="message-wall">
         {messages.map((msg) => {
@@ -295,11 +298,11 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
           }} />
           <small>
             {quote
-              ? `${quote.token_count} tokens · ${quote.billing_units} billing unit${quote.billing_units === 1 ? "" : "s"}`
+              ? `${quote.token_count} tokens · ${quote.billing_units} billing unit${quote.billing_units === 1 ? "" : "s"} · ${cannotAfford ? "recharge needed" : `${money(quote.spendable_balance)} spendable`}`
               : "Type to calculate token cost"}
           </small>
         </div>
-        <IconButton title="Send paid message" onClick={submit} disabled={!text.trim()}><Send size={20} /></IconButton>
+        <IconButton title={cannotAfford ? "Recharge to send" : "Send paid message"} onClick={submit} disabled={!text.trim() || cannotAfford}><Send size={20} /></IconButton>
       </footer>
     </section>
   );

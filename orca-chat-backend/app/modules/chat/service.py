@@ -23,6 +23,7 @@ from app.utils.ledger import (
     get_system_wallet,
     lock_wallets,
     money,
+    spendable_balance,
 )
 from app.utils.time import utc_now
 
@@ -273,8 +274,9 @@ def calculate_message_pricing(content: str) -> dict:
     }
 
 
-def message_price_quote(content: str) -> dict:
+def message_price_quote(content: str, sender: User) -> dict:
     pricing = calculate_message_pricing(content)
+    sender_spendable = spendable_balance(sender.wallet)
     return {
         "pricing_model": "token_units",
         "token_count": pricing["token_count"],
@@ -284,6 +286,8 @@ def message_price_quote(content: str) -> dict:
         "receiver_reward": pricing["receiver_reward"],
         "platform_gas": pricing["platform_gas"],
         "reserve_reward": pricing["reserve_reward"],
+        "spendable_balance": sender_spendable,
+        "can_afford": sender_spendable >= pricing["message_cost"],
     }
 
 

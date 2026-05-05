@@ -33,7 +33,7 @@ reserve = message_cost - receiver_reward - platform_gas
 
 With the default settings, up to 20 estimated tokens costs 1 ORCA. Longer messages scale to 2 ORCA, 3 ORCA, and so on.
 
-The UI calls `POST /messages/quote` before sending so the composer displays the same price the ledger will charge.
+The UI calls `POST /messages/quote` before sending so the composer displays the same price the ledger will charge. The quote also returns the sender's spendable balance and whether the message is affordable.
 
 ## Run Locally
 

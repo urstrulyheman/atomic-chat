@@ -116,7 +116,7 @@ def quote_message_price(
     payload: schemas.MessagePriceQuoteRequest,
     current_user: User = Depends(get_current_user),
 ):
-    return service.message_price_quote(payload.content)
+    return service.message_price_quote(payload.content, current_user)
 
 
 @router.post("/chats/{chat_id}/read", response_model=schemas.ConversationReadResponse)

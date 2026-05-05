@@ -449,6 +449,12 @@ button {
   font-weight: 800;
 }
 
+.fee-pill.danger {
+  background: rgba(255, 107, 107, 0.14);
+  color: #ff9b9b;
+  border-color: rgba(255, 107, 107, 0.35);
+}
+
 .message-wall {
   flex: 1;
   min-height: 0;

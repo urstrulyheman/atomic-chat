@@ -83,6 +83,8 @@ class MessagePriceQuoteOut(BaseModel):
     receiver_reward: Decimal
     platform_gas: Decimal
     reserve_reward: Decimal
+    spendable_balance: Decimal
+    can_afford: bool
 
 
 class MessageOut(BaseModel):

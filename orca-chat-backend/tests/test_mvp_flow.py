@@ -213,9 +213,27 @@ def test_message_price_quote_matches_token_billing_without_spending():
         "receiver_reward": "1.300000",
         "platform_gas": "0.500000",
         "reserve_reward": "0.200000",
+        "spendable_balance": "20.000000",
+        "can_afford": True,
     }
     assert blank.status_code == 422
     assert balance.json()["spendable_balance"] == "20.000000"
+
+
+def test_message_price_quote_marks_unaffordable_messages():
+    sender = login("+919000000176", "Unaffordable Quote Sender")
+    content = "x" * 2000
+
+    quote = client.post(
+        "/messages/quote",
+        json={"content": content},
+        headers=auth(sender["access_token"]),
+    )
+
+    assert quote.status_code == 200
+    assert quote.json()["message_cost"] == "25.000000"
+    assert quote.json()["spendable_balance"] == "20.000000"
+    assert quote.json()["can_afford"] is False
 
 
 def test_admin_metrics_support_date_windows():

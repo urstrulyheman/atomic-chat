@@ -89,8 +89,18 @@ def debit_spendable(
     amount = money(amount)
     if wallet.status != "active":
         raise HTTPException(status_code=423, detail="Wallet is not active")
-    if spendable_balance(wallet) < amount:
-        raise HTTPException(status_code=402, detail="Please recharge Orca Coins")
+    current_spendable = spendable_balance(wallet)
+    if current_spendable < amount:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "insufficient_balance",
+                "message": "Please recharge Orca Coins",
+                "required_amount": str(amount),
+                "spendable_balance": str(current_spendable),
+                "shortfall": str(money(amount - current_spendable)),
+            },
+        )
 
     purchased_debit = min(money(wallet.purchased_balance), amount)
     earned_debit = amount - purchased_debit

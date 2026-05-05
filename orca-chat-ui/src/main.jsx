@@ -27,6 +27,15 @@ const TOKEN_KEY = "orca_access_token";
 const money = (value) => Number(value || 0).toFixed(2);
 const initials = (user) => (user?.name || user?.username || user?.phone || "?").slice(0, 2).toUpperCase();
 
+function requestErrorMessage(data) {
+  if (typeof data?.detail === "string") return data.detail;
+  if (data?.detail?.code === "insufficient_balance") {
+    return `${data.detail.message}. Need ${money(data.detail.shortfall)} more ORCA.`;
+  }
+  if (data?.detail?.message) return data.detail.message;
+  return "Request failed";
+}
+
 async function request(path, options = {}) {
   const token = sessionStorage.getItem(TOKEN_KEY);
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
@@ -34,7 +43,7 @@ async function request(path, options = {}) {
   const response = await fetch(`${API}${path}`, { ...options, headers });
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.detail || "Request failed");
+  if (!response.ok) throw new Error(requestErrorMessage(data));
   return data;
 }
 

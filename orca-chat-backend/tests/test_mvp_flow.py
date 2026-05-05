@@ -236,6 +236,40 @@ def test_message_price_quote_marks_unaffordable_messages():
     assert quote.json()["can_afford"] is False
 
 
+def test_paid_message_over_balance_returns_structured_error_without_spending():
+    sender = login("+919000000177", "Insufficient Sender")
+    receiver = login("+919000000178", "Insufficient Receiver")
+    chat = client.post(
+        "/chats",
+        json={"receiver_id": receiver["user"]["id"]},
+        headers=auth(sender["access_token"]),
+    ).json()
+
+    with SessionLocal() as db:
+        transaction_count_before = db.query(LedgerTransaction).count()
+
+    response = client.post(
+        f"/chats/{chat['id']}/messages",
+        json={"receiver_id": receiver["user"]["id"], "content": "x" * 2000},
+        headers=auth(sender["access_token"]),
+    )
+    sender_balance = client.get("/wallet/balance", headers=auth(sender["access_token"])).json()
+
+    with SessionLocal() as db:
+        transaction_count_after = db.query(LedgerTransaction).count()
+
+    assert response.status_code == 402
+    assert response.json()["detail"] == {
+        "code": "insufficient_balance",
+        "message": "Please recharge Orca Coins",
+        "required_amount": "25.000000",
+        "spendable_balance": "20.000000",
+        "shortfall": "5.000000",
+    }
+    assert sender_balance["spendable_balance"] == "20.000000"
+    assert transaction_count_after == transaction_count_before
+
+
 def test_admin_metrics_support_date_windows():
     sender = login("+919000000117", "Metrics Window Sender")
     receiver = login("+919000000118", "Metrics Window Receiver")

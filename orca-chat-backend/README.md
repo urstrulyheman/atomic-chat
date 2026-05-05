@@ -6,7 +6,7 @@ FastAPI prototype for the Orca Chat Coin economy loop:
 - User profile and automatic wallet creation
 - Welcome bonus coin credit
 - 1-to-1 conversations and paid messages
-- Sender coin deduction from purchased balance first, then earned balance
+- Token-unit message pricing with sender coin deduction from purchased balance first, then earned balance
 - Receiver locked reward
 - Platform gas and reserve wallets
 - Razorpay order creation, webhook handling, and dev capture route
@@ -15,6 +15,23 @@ FastAPI prototype for the Orca Chat Coin economy loop:
 - Admin metrics for users, messages, payments, gas, locked coins, fraud
 - WebSocket endpoint at `/ws/chat?token=JWT`
 - Paid-message wallet rows are locked with `SELECT ... FOR UPDATE` on PostgreSQL before debits and rewards
+
+## Message Pricing
+
+Paid messages are billed by estimated token units, not a flat cost per message.
+
+Default formula:
+
+```text
+estimated_tokens = ceil(normalized_message_length / 4)
+billing_units = ceil(estimated_tokens / MESSAGE_BILLING_TOKENS_PER_UNIT)
+message_cost = billing_units * MESSAGE_DEFAULT_COST
+receiver_reward = message_cost * MESSAGE_RECEIVER_REWARD_PERCENT
+platform_gas = message_cost * MESSAGE_PLATFORM_GAS_PERCENT
+reserve = message_cost - receiver_reward - platform_gas
+```
+
+With the default settings, up to 20 estimated tokens costs 1 ORCA. Longer messages scale to 2 ORCA, 3 ORCA, and so on.
 
 ## Run Locally
 

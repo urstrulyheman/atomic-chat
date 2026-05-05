@@ -25,7 +25,7 @@ Built or scaffolded in this repo:
 - Wallet balances: purchased, earned, locked, spendable
 - 1-to-1 conversations
 - WebSocket real-time chat endpoint
-- Paid message spend flow
+- Token-unit paid message spend flow
 - Receiver reward and reward lock period
 - Platform gas and reserve accounting
 - Double-entry ledger entries
@@ -159,7 +159,7 @@ This is the condensed working log from the MVP build and hardening conversation.
 ### Chat Hardening
 
 - Added conversations and direct chat membership.
-- Added paid message sending with wallet deduction, receiver reward, gas, and reserve split.
+- Added token-unit paid message sending with wallet deduction, receiver reward, gas, and reserve split based on message cost.
 - Added message idempotency.
 - Added max message content length.
 - Added content normalization and duplicate-content fraud hashing.

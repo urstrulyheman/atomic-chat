@@ -154,6 +154,39 @@ def test_paid_message_economy_flow():
     assert metrics["wallet"]["total_gas_collected"] == 0.25
 
 
+def test_paid_message_cost_scales_by_billing_tokens():
+    sender = login("+919000000173", "Token Cost Sender")
+    receiver = login("+919000000174", "Token Cost Receiver")
+    chat = client.post(
+        "/chats",
+        json={"receiver_id": receiver["user"]["id"]},
+        headers=auth(sender["access_token"]),
+    ).json()
+    content = "x" * 81
+
+    sent = client.post(
+        f"/chats/{chat['id']}/messages",
+        json={"receiver_id": receiver["user"]["id"], "content": content},
+        headers=auth(sender["access_token"]),
+    )
+    sender_balance = client.get("/wallet/balance", headers=auth(sender["access_token"])).json()
+    receiver_balance = client.get("/wallet/balance", headers=auth(receiver["access_token"])).json()
+    sender_history = client.get("/wallet/transactions", headers=auth(sender["access_token"])).json()
+
+    assert sent.status_code == 200
+    assert sent.json()["coin_cost"] == "2.000000"
+    assert sender_balance["spendable_balance"] == "18.000000"
+    assert receiver_balance["locked_balance"] == "1.300000"
+    transaction = next(row for row in sender_history if row["id"] == sent.json()["transaction_id"])
+    assert transaction["gross_amount"] == "2.000000"
+    assert transaction["platform_gas"] == "0.500000"
+    assert transaction["receiver_reward"] == "1.300000"
+    assert transaction["reserve_amount"] == "0.200000"
+    assert transaction["metadata"]["pricing_model"] == "token_units"
+    assert transaction["metadata"]["billing_token_count"] == 21
+    assert transaction["metadata"]["billing_units"] == 2
+
+
 def test_admin_metrics_support_date_windows():
     sender = login("+919000000117", "Metrics Window Sender")
     receiver = login("+919000000118", "Metrics Window Receiver")

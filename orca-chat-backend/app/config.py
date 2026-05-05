@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     message_receiver_reward: Decimal = Decimal("0.65")
     message_platform_gas: Decimal = Decimal("0.25")
     message_reserve_reward: Decimal = Decimal("0.10")
+    message_billing_tokens_per_unit: int = 20
+    message_receiver_reward_percent: Decimal = Decimal("0.65")
+    message_platform_gas_percent: Decimal = Decimal("0.25")
     message_max_content_length: int = 4000
     message_max_sends_per_minute: int = 20
     message_idempotency_key_max_length: int = 120
@@ -75,6 +78,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
+        if self.message_billing_tokens_per_unit < 1:
+            raise ValueError("MESSAGE_BILLING_TOKENS_PER_UNIT must be at least 1")
+        if self.message_receiver_reward_percent < 0 or self.message_platform_gas_percent < 0:
+            raise ValueError("Message reward and gas percentages cannot be negative")
+        if self.message_receiver_reward_percent + self.message_platform_gas_percent > 1:
+            raise ValueError("Message reward and gas percentages cannot exceed 100% combined")
+
         if not self.is_production:
             return self
 

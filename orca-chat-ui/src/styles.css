@@ -505,12 +505,23 @@ button {
 }
 
 .composer textarea {
-  flex: 1;
   min-height: 42px;
   max-height: 110px;
   border-radius: 12px;
   resize: vertical;
   padding: 10px 12px;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-input small {
+  display: block;
+  margin-top: 4px;
+  color: #8fa3ad;
+  font-size: 11px;
 }
 
 .wallet-hero {

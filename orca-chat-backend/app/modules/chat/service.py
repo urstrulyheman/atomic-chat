@@ -2,6 +2,7 @@ import re
 from hashlib import sha256
 from datetime import timedelta
 from decimal import Decimal
+from math import ceil
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -175,10 +176,11 @@ def _send_message(
 
     risky, reason = is_fraud_risk(db, sender, receiver, content_hash)
 
-    message_cost = money(settings.message_default_cost)
-    receiver_reward = money(settings.message_receiver_reward)
-    platform_gas = money(settings.message_platform_gas)
-    reserve_reward = money(settings.message_reserve_reward)
+    pricing = calculate_message_pricing(content)
+    message_cost = pricing["message_cost"]
+    receiver_reward = pricing["receiver_reward"]
+    platform_gas = pricing["platform_gas"]
+    reserve_reward = pricing["reserve_reward"]
     reward_cap_applied = False
     if risky:
         receiver_reward = Decimal("0.000000")
@@ -199,7 +201,15 @@ def _send_message(
         platform_gas=platform_gas,
         receiver_reward=receiver_reward,
         reserve_amount=reserve_reward,
-        metadata={"fraud_risk": risky, "fraud_reason": reason, "reward_cap_applied": reward_cap_applied},
+        metadata={
+            "fraud_risk": risky,
+            "fraud_reason": reason,
+            "reward_cap_applied": reward_cap_applied,
+            "pricing_model": "token_units",
+            "billing_token_count": pricing["token_count"],
+            "billing_units": pricing["billing_units"],
+            "tokens_per_unit": settings.message_billing_tokens_per_unit,
+        },
     )
 
     debit_spendable(db, sender_wallet, message_cost, transaction, "Paid message")
@@ -211,7 +221,7 @@ def _send_message(
             user_id=receiver.id,
             source="message",
             reference_id=transaction.id,
-            base_reward=settings.message_receiver_reward,
+            base_reward=pricing["receiver_reward"],
             final_reward=receiver_reward,
             trust_multiplier=Decimal("1.0000"),
             fraud_multiplier=Decimal("1.0000"),
@@ -236,6 +246,31 @@ def _send_message(
     db.add(message)
     db.flush()
     return message
+
+
+def estimate_message_tokens(content: str) -> int:
+    normalized = " ".join(content.strip().split())
+    if not normalized:
+        return 0
+    return max(1, ceil(len(normalized) / 4))
+
+
+def calculate_message_pricing(content: str) -> dict:
+    token_count = estimate_message_tokens(content)
+    tokens_per_unit = max(1, settings.message_billing_tokens_per_unit)
+    billing_units = max(1, ceil(token_count / tokens_per_unit))
+    message_cost = money(settings.message_default_cost * Decimal(billing_units))
+    platform_gas = money(message_cost * settings.message_platform_gas_percent)
+    receiver_reward = money(message_cost * settings.message_receiver_reward_percent)
+    reserve_reward = money(message_cost - platform_gas - receiver_reward)
+    return {
+        "token_count": token_count,
+        "billing_units": billing_units,
+        "message_cost": message_cost,
+        "platform_gas": platform_gas,
+        "receiver_reward": receiver_reward,
+        "reserve_reward": reserve_reward,
+    }
 
 
 def daily_free_message_limit(user: User) -> int:

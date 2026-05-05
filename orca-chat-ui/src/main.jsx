@@ -23,9 +23,24 @@ import "./styles.css";
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const WS = API.replace(/^http/, "ws");
 const TOKEN_KEY = "orca_access_token";
+const BILLING_TOKENS_PER_UNIT = 20;
+const ORCA_PER_BILLING_UNIT = 1;
 
 const money = (value) => Number(value || 0).toFixed(2);
 const initials = (user) => (user?.name || user?.username || user?.phone || "?").slice(0, 2).toUpperCase();
+const estimateTokens = (content) => {
+  const normalized = content.trim().replace(/\s+/g, " ");
+  return normalized ? Math.max(1, Math.ceil(normalized.length / 4)) : 0;
+};
+const estimateMessageCost = (content) => {
+  const tokens = estimateTokens(content);
+  const billingUnits = Math.max(1, Math.ceil(tokens / BILLING_TOKENS_PER_UNIT));
+  return {
+    tokens,
+    billingUnits,
+    cost: tokens ? billingUnits * ORCA_PER_BILLING_UNIT : ORCA_PER_BILLING_UNIT
+  };
+};
 
 async function request(path, options = {}) {
   const token = sessionStorage.getItem(TOKEN_KEY);
@@ -124,7 +139,7 @@ function Login({ onAuthed }) {
       <section className="login-preview">
         <div className="metric-strip">
           <span><Wallet size={16} /> 20 ORCA welcome</span>
-          <span><Gauge size={16} /> 0.25 gas/message</span>
+          <span><Gauge size={16} /> 25% gas split</span>
           <span><ShieldAlert size={16} /> Fraud flags</span>
         </div>
       </section>
@@ -234,6 +249,7 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
     );
   }
   const other = chat.user;
+  const estimate = estimateMessageCost(text);
   async function submit() {
     const value = text.trim();
     if (!value) return;
@@ -245,7 +261,7 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
       <header className="chat-header">
         <Avatar user={other} />
         <div><strong>{other?.name || other?.phone}</strong><span>{wsOnline ? "WebSocket online" : "REST fallback ready"}</span></div>
-        <div className="fee-pill">1 ORCA/message</div>
+        <div className="fee-pill">{money(estimate.cost)} ORCA est.</div>
       </header>
       <div className="message-wall">
         {messages.map((msg) => {
@@ -262,12 +278,15 @@ function ChatView({ chat, messages, currentUser, onSend, wsOnline }) {
         <div ref={endRef} />
       </div>
       <footer className="composer">
-        <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a paid message..." onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }} />
+        <div className="composer-input">
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a paid message..." onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }} />
+          <small>{estimate.tokens} tokens · {estimate.billingUnits} billing unit{estimate.billingUnits === 1 ? "" : "s"}</small>
+        </div>
         <IconButton title="Send paid message" onClick={submit} disabled={!text.trim()}><Send size={20} /></IconButton>
       </footer>
     </section>

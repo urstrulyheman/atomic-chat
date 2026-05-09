@@ -2,7 +2,9 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
+import csv
 import hmac
+import io
 import json
 import logging
 from datetime import timedelta
@@ -1316,6 +1318,89 @@ def test_admin_ledger_entries_support_reconciliation_filters():
     assert invalid_entry_type.status_code == 422
     assert blank_balance_type.status_code == 422
     assert blank_balance_type.json()["detail"] == "balance_type cannot be blank"
+
+
+def test_admin_ledger_transactions_export_matches_reconciliation_filters():
+    sender = login("+919000000179", "Ledger Export Sender")
+    receiver = login("+919000000180", "Ledger Export Receiver")
+    admin = make_admin("+919999999040")
+    today = utc_now().date().isoformat()
+    headers = {**auth(sender["access_token"]), "X-Idempotency-Key": "ledger_export_001"}
+
+    transfer = client.post(
+        "/wallet/transfer",
+        json={"receiver_id": receiver["user"]["id"], "amount": "7.000000", "note": "ledger export"},
+        headers=headers,
+    )
+    sender_wallet_id = transfer.json()["from_wallet_id"]
+    export = client.get(
+        (
+            "/admin/ledger/transactions/export"
+            f"?wallet_id={sender_wallet_id}&direction=outgoing&idempotency_key=%20ledger_export_001%20"
+            f"&min_gross_amount=7&max_gross_amount=7&start_date={today}&end_date={today}"
+        ),
+        headers=auth(admin["access_token"]),
+    )
+    invalid = client.get(
+        "/admin/ledger/transactions/export?min_gross_amount=10&max_gross_amount=1",
+        headers=auth(admin["access_token"]),
+    )
+
+    rows = list(csv.DictReader(io.StringIO(export.text)))
+
+    assert transfer.status_code == 200
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/csv")
+    assert "orca-ledger-transactions.csv" in export.headers["content-disposition"]
+    assert len(rows) == 1
+    assert rows[0]["id"] == transfer.json()["id"]
+    assert rows[0]["direction"] == "outgoing"
+    assert rows[0]["gross_amount"] == "7.000000"
+    assert rows[0]["platform_gas"] == "0.140000"
+    assert rows[0]["idempotency_key"] == "ledger_export_001"
+    assert json.loads(rows[0]["metadata_json"])["note"] == "ledger export"
+    assert invalid.status_code == 400
+
+
+def test_admin_ledger_entries_export_matches_reconciliation_filters():
+    sender = login("+919000000181", "Entry Export Sender")
+    receiver = login("+919000000182", "Entry Export Receiver")
+    admin = make_admin("+919999999041")
+    today = utc_now().date().isoformat()
+
+    transfer = client.post(
+        "/wallet/transfer",
+        json={"receiver_id": receiver["user"]["id"], "amount": "8.000000", "note": "entry export"},
+        headers=auth(sender["access_token"]),
+    )
+    sender_wallet_id = transfer.json()["from_wallet_id"]
+    export = client.get(
+        (
+            f"/admin/ledger/entries/export?wallet_id={sender_wallet_id}&entry_type=DEBIT"
+            f"&balance_type=purchased&min_amount=8&max_amount=8&start_date={today}&end_date={today}"
+        ),
+        headers=auth(admin["access_token"]),
+    )
+    invalid = client.get(
+        "/admin/ledger/entries/export?min_amount=10&max_amount=1",
+        headers=auth(admin["access_token"]),
+    )
+
+    rows = list(csv.DictReader(io.StringIO(export.text)))
+
+    assert transfer.status_code == 200
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/csv")
+    assert "orca-wallet-entries.csv" in export.headers["content-disposition"]
+    assert len(rows) == 1
+    assert rows[0]["transaction_id"] == transfer.json()["id"]
+    assert rows[0]["wallet_id"] == sender_wallet_id
+    assert rows[0]["user_phone"] == sender["user"]["phone"]
+    assert rows[0]["entry_type"] == "DEBIT"
+    assert rows[0]["direction"] == "debit"
+    assert rows[0]["amount"] == "8.000000"
+    assert rows[0]["signed_amount"] == "-8.000000"
+    assert invalid.status_code == 400
 
 
 def test_wallet_transfer_idempotency_rejects_key_reuse_with_different_payload():

@@ -1,3 +1,6 @@
+import csv
+import io
+import json
 import re
 from uuid import UUID
 from datetime import date, datetime, time, timedelta, timezone
@@ -5,7 +8,7 @@ from decimal import Decimal
 from typing import Literal
 
 from sqlalchemy import func, or_
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -394,6 +397,100 @@ def normalize_query_filter(name: str, value: str) -> str:
     return normalized
 
 
+def build_ledger_transactions_query(
+    db: Session,
+    *,
+    transaction_type: str | None,
+    status: str | None,
+    wallet_id: UUID | None,
+    direction: str | None,
+    from_wallet_id: UUID | None,
+    to_wallet_id: UUID | None,
+    reference_id: UUID | None,
+    idempotency_key: str | None,
+    min_gross_amount: Decimal | None,
+    max_gross_amount: Decimal | None,
+    min_platform_gas: Decimal | None,
+    start_date: date | None,
+    end_date: date | None,
+):
+    if min_gross_amount is not None and max_gross_amount is not None and min_gross_amount > max_gross_amount:
+        raise HTTPException(status_code=400, detail="min_gross_amount must be less than or equal to max_gross_amount")
+    if direction and wallet_id is None:
+        raise HTTPException(status_code=400, detail="wallet_id is required when filtering by direction")
+    start_at, end_before = metrics_window(start_date, end_date)
+
+    query = db.query(LedgerTransaction)
+    if transaction_type:
+        transaction_type = normalize_query_filter("transaction_type", transaction_type).lower()
+        query = query.filter(LedgerTransaction.transaction_type == transaction_type)
+    if status:
+        query = query.filter(LedgerTransaction.status == status)
+    if wallet_id:
+        query = query.filter(or_(LedgerTransaction.from_wallet_id == wallet_id, LedgerTransaction.to_wallet_id == wallet_id))
+        if direction == "incoming":
+            query = query.filter(
+                LedgerTransaction.to_wallet_id == wallet_id,
+                or_(LedgerTransaction.from_wallet_id.is_(None), LedgerTransaction.from_wallet_id != wallet_id),
+            )
+        elif direction == "outgoing":
+            query = query.filter(
+                LedgerTransaction.from_wallet_id == wallet_id,
+                or_(LedgerTransaction.to_wallet_id.is_(None), LedgerTransaction.to_wallet_id != wallet_id),
+            )
+        elif direction == "internal":
+            query = query.filter(LedgerTransaction.from_wallet_id == wallet_id, LedgerTransaction.to_wallet_id == wallet_id)
+    if from_wallet_id:
+        query = query.filter(LedgerTransaction.from_wallet_id == from_wallet_id)
+    if to_wallet_id:
+        query = query.filter(LedgerTransaction.to_wallet_id == to_wallet_id)
+    if reference_id:
+        query = query.filter(LedgerTransaction.reference_id == reference_id)
+    if idempotency_key:
+        idempotency_key = normalize_query_filter("idempotency_key", idempotency_key)
+        query = query.filter(LedgerTransaction.idempotency_key == idempotency_key)
+    if min_gross_amount is not None:
+        query = query.filter(LedgerTransaction.gross_amount >= min_gross_amount)
+    if max_gross_amount is not None:
+        query = query.filter(LedgerTransaction.gross_amount <= max_gross_amount)
+    if min_platform_gas is not None:
+        query = query.filter(LedgerTransaction.platform_gas >= min_platform_gas)
+    return apply_created_window(query, LedgerTransaction, start_at, end_before)
+
+
+def build_ledger_entries_query(
+    db: Session,
+    *,
+    transaction_id: UUID | None,
+    wallet_id: UUID | None,
+    entry_type: str | None,
+    balance_type: str | None,
+    min_amount: Decimal | None,
+    max_amount: Decimal | None,
+    start_date: date | None,
+    end_date: date | None,
+):
+    if min_amount is not None and max_amount is not None and min_amount > max_amount:
+        raise HTTPException(status_code=400, detail="min_amount must be less than or equal to max_amount")
+    start_at, end_before = metrics_window(start_date, end_date)
+
+    query = db.query(WalletEntry)
+    if transaction_id:
+        query = query.filter(WalletEntry.transaction_id == transaction_id)
+    if wallet_id:
+        query = query.filter(WalletEntry.wallet_id == wallet_id)
+    if entry_type:
+        query = query.filter(WalletEntry.entry_type == entry_type)
+    if balance_type:
+        balance_type = normalize_query_filter("balance_type", balance_type).lower()
+        query = query.filter(WalletEntry.balance_type == balance_type)
+    if min_amount is not None:
+        query = query.filter(WalletEntry.amount >= min_amount)
+    if max_amount is not None:
+        query = query.filter(WalletEntry.amount <= max_amount)
+    return apply_created_window(query, WalletEntry, start_at, end_before)
+
+
 @router.post("/payments/{payment_order_id}/fail")
 def fail_payment_order(
     payment_order_id: UUID,
@@ -492,50 +589,82 @@ def ledger_transactions(
     end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    if min_gross_amount is not None and max_gross_amount is not None and min_gross_amount > max_gross_amount:
-        raise HTTPException(status_code=400, detail="min_gross_amount must be less than or equal to max_gross_amount")
-    if direction and wallet_id is None:
-        raise HTTPException(status_code=400, detail="wallet_id is required when filtering by direction")
-    start_at, end_before = metrics_window(start_date, end_date)
-
-    query = db.query(LedgerTransaction)
-    if transaction_type:
-        transaction_type = normalize_query_filter("transaction_type", transaction_type).lower()
-        query = query.filter(LedgerTransaction.transaction_type == transaction_type)
-    if status:
-        query = query.filter(LedgerTransaction.status == status)
-    if wallet_id:
-        query = query.filter(or_(LedgerTransaction.from_wallet_id == wallet_id, LedgerTransaction.to_wallet_id == wallet_id))
-        if direction == "incoming":
-            query = query.filter(
-                LedgerTransaction.to_wallet_id == wallet_id,
-                or_(LedgerTransaction.from_wallet_id.is_(None), LedgerTransaction.from_wallet_id != wallet_id),
-            )
-        elif direction == "outgoing":
-            query = query.filter(
-                LedgerTransaction.from_wallet_id == wallet_id,
-                or_(LedgerTransaction.to_wallet_id.is_(None), LedgerTransaction.to_wallet_id != wallet_id),
-            )
-        elif direction == "internal":
-            query = query.filter(LedgerTransaction.from_wallet_id == wallet_id, LedgerTransaction.to_wallet_id == wallet_id)
-    if from_wallet_id:
-        query = query.filter(LedgerTransaction.from_wallet_id == from_wallet_id)
-    if to_wallet_id:
-        query = query.filter(LedgerTransaction.to_wallet_id == to_wallet_id)
-    if reference_id:
-        query = query.filter(LedgerTransaction.reference_id == reference_id)
-    if idempotency_key:
-        idempotency_key = normalize_query_filter("idempotency_key", idempotency_key)
-        query = query.filter(LedgerTransaction.idempotency_key == idempotency_key)
-    if min_gross_amount is not None:
-        query = query.filter(LedgerTransaction.gross_amount >= min_gross_amount)
-    if max_gross_amount is not None:
-        query = query.filter(LedgerTransaction.gross_amount <= max_gross_amount)
-    if min_platform_gas is not None:
-        query = query.filter(LedgerTransaction.platform_gas >= min_platform_gas)
-    query = apply_created_window(query, LedgerTransaction, start_at, end_before)
+    query = build_ledger_transactions_query(
+        db,
+        transaction_type=transaction_type,
+        status=status,
+        wallet_id=wallet_id,
+        direction=direction,
+        from_wallet_id=from_wallet_id,
+        to_wallet_id=to_wallet_id,
+        reference_id=reference_id,
+        idempotency_key=idempotency_key,
+        min_gross_amount=min_gross_amount,
+        max_gross_amount=max_gross_amount,
+        min_platform_gas=min_platform_gas,
+        start_date=start_date,
+        end_date=end_date,
+    )
     rows = query.order_by(LedgerTransaction.created_at.desc()).offset(offset).limit(limit).all()
     return [admin_transaction_out(row, wallet_id) for row in rows]
+
+
+@router.get("/ledger/transactions/export")
+def export_ledger_transactions(
+    limit: int = Query(default=500, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    transaction_type: str | None = Query(default=None, min_length=1, max_length=50),
+    status: Literal["settled", "pending", "failed"] | None = Query(default=None),
+    wallet_id: UUID | None = Query(default=None),
+    direction: Literal["incoming", "outgoing", "internal"] | None = Query(default=None),
+    from_wallet_id: UUID | None = Query(default=None),
+    to_wallet_id: UUID | None = Query(default=None),
+    reference_id: UUID | None = Query(default=None),
+    idempotency_key: str | None = Query(default=None, min_length=1, max_length=120),
+    min_gross_amount: Decimal | None = Query(default=None, ge=0),
+    max_gross_amount: Decimal | None = Query(default=None, ge=0),
+    min_platform_gas: Decimal | None = Query(default=None, ge=0),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    query = build_ledger_transactions_query(
+        db,
+        transaction_type=transaction_type,
+        status=status,
+        wallet_id=wallet_id,
+        direction=direction,
+        from_wallet_id=from_wallet_id,
+        to_wallet_id=to_wallet_id,
+        reference_id=reference_id,
+        idempotency_key=idempotency_key,
+        min_gross_amount=min_gross_amount,
+        max_gross_amount=max_gross_amount,
+        min_platform_gas=min_platform_gas,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    rows = query.order_by(LedgerTransaction.created_at.desc()).offset(offset).limit(limit).all()
+    return csv_response(
+        "orca-ledger-transactions.csv",
+        [
+            "id",
+            "transaction_type",
+            "reference_id",
+            "from_wallet_id",
+            "to_wallet_id",
+            "direction",
+            "gross_amount",
+            "platform_gas",
+            "receiver_reward",
+            "reserve_amount",
+            "status",
+            "idempotency_key",
+            "metadata_json",
+            "created_at",
+        ],
+        [ledger_transaction_csv_row(row, wallet_id) for row in rows],
+    )
 
 
 @router.get("/ledger/entries")
@@ -552,29 +681,70 @@ def ledger_entries(
     end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    if min_amount is not None and max_amount is not None and min_amount > max_amount:
-        raise HTTPException(status_code=400, detail="min_amount must be less than or equal to max_amount")
-    start_at, end_before = metrics_window(start_date, end_date)
-
-    query = db.query(WalletEntry)
-    if transaction_id:
-        query = query.filter(WalletEntry.transaction_id == transaction_id)
-    if wallet_id:
-        query = query.filter(WalletEntry.wallet_id == wallet_id)
-    if entry_type:
-        query = query.filter(WalletEntry.entry_type == entry_type)
-    if balance_type:
-        balance_type = normalize_query_filter("balance_type", balance_type).lower()
-        query = query.filter(WalletEntry.balance_type == balance_type)
-    if min_amount is not None:
-        query = query.filter(WalletEntry.amount >= min_amount)
-    if max_amount is not None:
-        query = query.filter(WalletEntry.amount <= max_amount)
-    query = apply_created_window(query, WalletEntry, start_at, end_before)
+    query = build_ledger_entries_query(
+        db,
+        transaction_id=transaction_id,
+        wallet_id=wallet_id,
+        entry_type=entry_type,
+        balance_type=balance_type,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        start_date=start_date,
+        end_date=end_date,
+    )
     rows = query.order_by(WalletEntry.created_at.desc()).offset(offset).limit(limit).all()
     wallets_by_id = load_wallets_by_id(db, {row.wallet_id for row in rows})
     users_by_id = load_users_by_id(db, {wallet.user_id for wallet in wallets_by_id.values() if wallet.user_id is not None})
     return [admin_wallet_entry_out(row, wallets_by_id.get(row.wallet_id), users_by_id) for row in rows]
+
+
+@router.get("/ledger/entries/export")
+def export_ledger_entries(
+    limit: int = Query(default=500, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    transaction_id: UUID | None = Query(default=None),
+    wallet_id: UUID | None = Query(default=None),
+    entry_type: Literal["DEBIT", "CREDIT"] | None = Query(default=None),
+    balance_type: str | None = Query(default=None, min_length=1, max_length=30),
+    min_amount: Decimal | None = Query(default=None, ge=0),
+    max_amount: Decimal | None = Query(default=None, ge=0),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    query = build_ledger_entries_query(
+        db,
+        transaction_id=transaction_id,
+        wallet_id=wallet_id,
+        entry_type=entry_type,
+        balance_type=balance_type,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    rows = query.order_by(WalletEntry.created_at.desc()).offset(offset).limit(limit).all()
+    wallets_by_id = load_wallets_by_id(db, {row.wallet_id for row in rows})
+    users_by_id = load_users_by_id(db, {wallet.user_id for wallet in wallets_by_id.values() if wallet.user_id is not None})
+    return csv_response(
+        "orca-wallet-entries.csv",
+        [
+            "id",
+            "transaction_id",
+            "wallet_id",
+            "user_id",
+            "user_phone",
+            "wallet_type",
+            "entry_type",
+            "direction",
+            "amount",
+            "signed_amount",
+            "balance_type",
+            "description",
+            "created_at",
+        ],
+        [wallet_entry_csv_row(row, wallets_by_id.get(row.wallet_id), users_by_id) for row in rows],
+    )
 
 
 @router.get("/rewards")
@@ -1196,6 +1366,58 @@ def admin_wallet_entry_out(entry: WalletEntry, wallet: Wallet | None, users_by_i
         "description": entry.description,
         "created_at": entry.created_at,
     }
+
+
+def ledger_transaction_csv_row(transaction: LedgerTransaction, wallet_id: UUID | None) -> dict:
+    row = admin_transaction_out(transaction, wallet_id)
+    return {
+        "id": row["id"],
+        "transaction_type": row["transaction_type"],
+        "reference_id": row["reference_id"] or "",
+        "from_wallet_id": row["from_wallet_id"] or "",
+        "to_wallet_id": row["to_wallet_id"] or "",
+        "direction": row["direction"] or "",
+        "gross_amount": row["gross_amount"],
+        "platform_gas": row["platform_gas"],
+        "receiver_reward": row["receiver_reward"],
+        "reserve_amount": row["reserve_amount"],
+        "status": row["status"],
+        "idempotency_key": transaction.idempotency_key or "",
+        "metadata_json": json.dumps(row["metadata"] or {}, sort_keys=True, separators=(",", ":"), default=str),
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
+def wallet_entry_csv_row(entry: WalletEntry, wallet: Wallet | None, users_by_id: dict[UUID, User]) -> dict:
+    row = admin_wallet_entry_out(entry, wallet, users_by_id)
+    user = row["wallet"]["user"] if row["wallet"] else None
+    return {
+        "id": row["id"],
+        "transaction_id": row["transaction_id"],
+        "wallet_id": row["wallet_id"],
+        "user_id": user["id"] if user else "",
+        "user_phone": user["phone"] if user else "",
+        "wallet_type": row["wallet"]["wallet_type"] if row["wallet"] else "",
+        "entry_type": row["entry_type"],
+        "direction": row["direction"],
+        "amount": row["amount"],
+        "signed_amount": row["signed_amount"],
+        "balance_type": row["balance_type"] or "",
+        "description": row["description"] or "",
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
+def csv_response(filename: str, fieldnames: list[str], rows: list[dict]) -> Response:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def wallet_summary(wallet: Wallet | None, users_by_id: dict[UUID, User]) -> dict | None:

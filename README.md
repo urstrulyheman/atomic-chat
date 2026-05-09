@@ -140,6 +140,7 @@ This is the condensed working log from the MVP build and hardening conversation.
 - Added ledger constraints for positive amounts and valid entry types.
 - Added wallet history filters, pagination, direction metadata, signed amounts, and blank-filter rejection.
 - Added ledger audit and balance reconciliation style checks.
+- Added admin CSV exports for ledger transactions and wallet entries using the same reconciliation filters as the JSON admin APIs.
 
 ### Payment Hardening
 
@@ -247,7 +248,6 @@ Both migration checks passed.
 ### Phase 3: Wallet And Ledger Production
 
 - Enforce immutable settled ledger rows.
-- Add admin CSV exports for ledger and wallet entries.
 - Add daily settlement verification endpoint.
 - Run settlement generation as a scheduled worker.
 - Add wallet balance reconciliation job.
